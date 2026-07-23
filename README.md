@@ -7,7 +7,7 @@ SagaPay (https://sagapay.net) is the world's first free, non-custodial blockchai
 Install the SagaPay PHP SDK via Composer:
 
 ```bash
-composer require sagapay/sdk
+composer require rootdigit/sagapay
 ```
 
 ## Quick Start
