@@ -1,5 +1,5 @@
 {
-    "name": "sagapay/sdk-php",
+    "name": "sagapay/sdk",
     "description": "SagaPay - The world's first free, non-custodial blockchain payment gateway SDK for PHP",
     "type": "library",
     "keywords": [
