@@ -19,8 +19,13 @@
             "homepage": "https://sagapay.net"
         }
     ],
+    "support": {
+        "issues": "https://github.com/rootdigit/sagapay-composer/issues",
+        "source": "https://github.com/rootdigit/sagapay-composer",
+        "docs": "https://sagapay.net/docs"
+    },
     "require": {
-        "php": ">=8.0",
+        "php": ">=8.2",
         "ext-curl": "*",
         "ext-json": "*"
     },
@@ -29,11 +34,5 @@
             "SagaPay\\SDK\\": "src/"
         }
     },
-    "minimum-stability": "stable",
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/halfindex/sagapay-sdk-php"
-        }
-    ]
+    "minimum-stability": "stable"
 }

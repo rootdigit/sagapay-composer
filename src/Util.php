@@ -46,7 +46,10 @@ class Util
     
     /**
      * Verify HMAC signature
-     * 
+     *
+     * Accepts both a bare hex digest and the "sha256=<hex>" format used by
+     * the X-Sagapay-Signature webhook header.
+     *
      * @param string $payload   Data that was signed
      * @param string $signature Signature to verify
      * @param string $secret    Secret key
@@ -54,6 +57,11 @@ class Util
      */
     public static function verifySignature(string $payload, string $signature, string $secret): bool
     {
+        // Strip the optional "sha256=" prefix from the provided signature
+        if (str_starts_with($signature, 'sha256=')) {
+            $signature = substr($signature, 7);
+        }
+
         $expectedSignature = self::generateSignature($payload, $secret);
         return hash_equals($expectedSignature, $signature);
     }

@@ -30,11 +30,11 @@ class Client
     /**
      * Constructor
      * 
-     * @param string $apiKey    Your SagaPay API key
-     * @param string $apiSecret Your SagaPay API secret
-     * @param string $baseUrl   Optional custom API base URL
+     * @param string      $apiKey    Your SagaPay API key
+     * @param string      $apiSecret Your SagaPay API secret
+     * @param string|null $baseUrl   Optional custom API base URL
      */
-    public function __construct(string $apiKey, string $apiSecret, string $baseUrl = null)
+    public function __construct(string $apiKey, string $apiSecret, ?string $baseUrl = null)
     {
         $this->apiKey = $apiKey;
         $this->apiSecret = $apiSecret;
@@ -75,23 +75,33 @@ class Client
     }
     
     /**
-     * Check transaction status
-     * 
-     * @param string $address Blockchain address to check
-     * @param string $type    Transaction type ("deposit" or "withdrawal")
+     * Check transaction status by address or ID
+     *
+     * @param string      $type    Transaction type ("deposit" or "withdrawal")
+     * @param string|null $address Blockchain address to check (optional if id is provided)
+     * @param string|null $id      Transaction ID to check (optional if address is provided)
      * @return array Response data
      * @throws Exception If the request fails
      */
-    public function checkTransactionStatus(string $address, string $type): array
+    public function checkTransactionStatus(string $type, ?string $address = null, ?string $id = null): array
     {
         if (!in_array($type, ['deposit', 'withdrawal'])) {
             throw new Exception("Type must be 'deposit' or 'withdrawal'", Exception::INVALID_PARAM);
         }
-        
-        return $this->request('GET', '/check-transaction-status', [
-            'address' => $address,
-            'type' => $type
-        ]);
+
+        if (empty($address) && empty($id)) {
+            throw new Exception("Either address or id is required", Exception::INVALID_PARAM);
+        }
+
+        $params = ['type' => $type];
+        if (!empty($address)) {
+            $params['address'] = $address;
+        }
+        if (!empty($id)) {
+            $params['id'] = $id;
+        }
+
+        return $this->request('GET', '/check-transaction-status', $params);
     }
     
     /**
@@ -113,8 +123,36 @@ class Client
     }
     
     /**
+     * Verify an IPN notification against the SagaPay API
+     *
+     * Confirms that a webhook/IPN you received corresponds to a real transaction
+     * on SagaPay. This endpoint authenticates via the request body (apiKey/apiSecret),
+     * so no x-api-key/x-api-secret headers are sent.
+     *
+     * @param string $txnHash Transaction hash from the IPN payload
+     * @param string $type    Transaction type ("DEPOSIT" or "WITHDRAWAL")
+     * @param string $amount  Amount from the IPN payload
+     * @param string $address Blockchain address from the IPN payload
+     * @return bool Whether the server verified the notification
+     * @throws Exception If the request fails
+     */
+    public function verifyIpn(string $txnHash, string $type, string $amount, string $address): bool
+    {
+        $response = $this->request('POST', '/verify-ipn', [
+            'txnHash' => $txnHash,
+            'type' => strtoupper($type),
+            'amount' => $amount,
+            'address' => $address,
+            'apiKey' => $this->apiKey,
+            'apiSecret' => $this->apiSecret
+        ], false);
+
+        return (bool)($response['verified'] ?? false);
+    }
+
+    /**
      * Get API key
-     * 
+     *
      * @return string API key
      */
     public function getApiKey(): string
@@ -131,62 +169,79 @@ class Client
     {
         return $this->apiSecret;
     }
-    
+
     /**
      * Make an API request
-     * 
-     * @param string $method HTTP method
-     * @param string $path   API endpoint path
-     * @param array  $params Request parameters
+     *
+     * @param string $method   HTTP method
+     * @param string $path     API endpoint path
+     * @param array  $params   Request parameters
+     * @param bool   $withAuth Whether to send the x-api-key/x-api-secret headers
      * @return array Response data
      * @throws Exception If the request fails
      */
-    private function request(string $method, string $path, array $params = []): array
+    private function request(string $method, string $path, array $params = [], bool $withAuth = true): array
     {
         $url = $this->baseUrl . $path;
         $headers = [
-            'x-api-key: ' . $this->apiKey,
-            'x-api-secret: ' . $this->apiSecret,
             'Content-Type: application/json',
             'Accept: application/json'
         ];
-        
+
+        if ($withAuth) {
+            $headers[] = 'x-api-key: ' . $this->apiKey;
+            $headers[] = 'x-api-secret: ' . $this->apiSecret;
+        }
+
         $ch = curl_init();
-        
+
         if ($method === 'GET') {
             $url .= '?' . http_build_query($params);
         } else {
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($params));
         }
-        
+
         curl_setopt($ch, CURLOPT_URL, $url);
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
-        
+
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $error = curl_error($ch);
-        
+        $curlError = curl_error($ch);
+
         curl_close($ch);
-        
+
         if ($response === false) {
-            throw new Exception('cURL error: ' . $error, Exception::NETWORK_ERROR);
+            throw new Exception('cURL error: ' . $curlError, Exception::NETWORK_ERROR);
         }
-        
+
+        // Store raw response for debugging purposes
+        $rawResponse = $response;
+
         $data = json_decode($response, true);
-        
+
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new Exception('Invalid JSON response: ' . $response, Exception::INVALID_RESPONSE);
+            throw new Exception('Invalid JSON response: ' . $rawResponse, Exception::INVALID_RESPONSE);
         }
-        
+
         if ($httpCode >= 400) {
-            $message = isset($data['message']) ? $data['message'] : 'API error';
-            $code = isset($data['error']) ? $data['error'] : Exception::API_ERROR;
-            throw new Exception($message, $code, $httpCode);
+            // The server returns its human-readable message in the "error" key:
+            // { "error": "..." }
+            $errorString = null;
+
+            if (isset($data['error']) && is_string($data['error'])) {
+                $errorString = $data['error'];
+            } elseif (isset($data['message']) && is_string($data['message'])) {
+                $errorString = $data['message'];
+            }
+
+            $message = $errorString ?? ('API error (HTTP ' . $httpCode . ')');
+
+            throw new Exception($message, Exception::API_ERROR, $httpCode, $errorString);
         }
-        
+
         return $data;
     }
 }

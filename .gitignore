@@ -1,2 +1,22 @@
-vendor
+# Dependencies
+/vendor/
+
+# Lock file: this is a library, so consumers resolve their own versions
 composer.lock
+
+# PHPUnit
+.phpunit.result.cache
+.phpunit.cache/
+
+# Environment
+.env
+.env.*
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db

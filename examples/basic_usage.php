@@ -49,7 +49,7 @@ try {
     // Example 3: Check transaction status
     echo "Checking transaction status...\n";
     $address = '0x742d35Cc6634C0532925a3b844Bc454e4438f44e';
-    $txStatus = $client->checkTransactionStatus($address, 'deposit');
+    $txStatus = $client->checkTransactionStatus('deposit', $address);
     
     echo "✓ Transaction status retrieved:\n";
     echo "  Address: {$txStatus['address']}\n";
