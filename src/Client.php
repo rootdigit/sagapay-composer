@@ -4,7 +4,7 @@
  * 
  * @package   SagaPay\SDK
  * @author    SagaPay Team
- * @copyright Copyright (c) 2025, SagaPay (https://sagapay.net)
+ * @copyright Copyright (c) 2025, SagaPay (https://sagapay.io)
  * @license   MIT
  * @version   1.0.0
  */
@@ -25,7 +25,7 @@ class Client
     /**
      * API base URL
      */
-    private string $baseUrl = 'https://api2.sagapay.net';
+    private string $baseUrl = 'https://api2.sagapay.io';
     
     /**
      * Constructor

@@ -10,19 +10,19 @@
         "php",
         "sdk"
     ],
-    "homepage": "https://sagapay.net",
+    "homepage": "https://sagapay.io",
     "license": "MIT",
     "authors": [
         {
             "name": "SagaPay Team",
-            "email": "support@sagapay.net",
-            "homepage": "https://sagapay.net"
+            "email": "support@sagapay.io",
+            "homepage": "https://sagapay.io"
         }
     ],
     "support": {
         "issues": "https://github.com/rootdigit/sagapay-composer/issues",
         "source": "https://github.com/rootdigit/sagapay-composer",
-        "docs": "https://sagapay.net/docs"
+        "docs": "https://sagapay.io/docs"
     },
     "require": {
         "php": ">=8.2",

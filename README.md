@@ -1,6 +1,6 @@
 # SagaPay PHP SDK
 
-SagaPay (https://sagapay.net) is the world's first free, non-custodial blockchain payment gateway service provider, enabling businesses to seamlessly integrate cryptocurrency payments without holding customer funds. With enterprise-grade security and zero transaction fees, SagaPay empowers merchants to accept crypto payments across multiple blockchains while maintaining full control of their digital assets.
+SagaPay (https://sagapay.io) is the world's first free, non-custodial blockchain payment gateway service provider, enabling businesses to seamlessly integrate cryptocurrency payments without holding customer funds. With enterprise-grade security and zero transaction fees, SagaPay empowers merchants to accept crypto payments across multiple blockchains while maintaining full control of their digital assets.
 
 ## Installation
 
@@ -225,4 +225,4 @@ This SDK is released under the MIT License.
 
 ## Support
 
-For questions or support, please contact support@sagapay.net or visit [https://sagapay.net](https://sagapay.net).
+For questions or support, please contact support@sagapay.io or visit [https://sagapay.io](https://sagapay.io).

@@ -4,7 +4,7 @@
  *
  * @package   SagaPay\SDK
  * @author    SagaPay Team
- * @copyright Copyright (c) 2025, SagaPay (https://sagapay.net)
+ * @copyright Copyright (c) 2025, SagaPay (https://sagapay.io)
  * @license   MIT
  * @version   1.0.0
  */
