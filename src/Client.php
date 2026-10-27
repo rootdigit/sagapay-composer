@@ -61,17 +61,35 @@ class Client
     
     /**
      * Create a withdrawal
-     * 
-     * @param array $params Parameters for creating a withdrawal
+     *
+     * The API key must have withdrawals enabled, which requires two-factor
+     * authentication on your account.
+     *
+     * @param array       $params         Parameters for creating a withdrawal
+     * @param string|null $idempotencyKey Sent as the Idempotency-Key header: 1-128 letters,
+     *                                    digits, '-' or '_'. Retrying with the same key within
+     *                                    24 hours returns the first request's withdrawal instead
+     *                                    of creating a second one. Use one key per payout.
      * @return array Response data
      * @throws Exception If the request fails
      */
-    public function createWithdrawal(array $params): array
+    public function createWithdrawal(array $params, ?string $idempotencyKey = null): array
     {
         $requiredParams = ['networkType', 'contractAddress', 'address', 'amount', 'ipnUrl'];
         Util::validateRequiredParams($params, $requiredParams);
-        
-        return $this->request('POST', '/create-withdrawal', $params);
+
+        $headers = [];
+        if ($idempotencyKey !== null) {
+            if (preg_match('/\A[A-Za-z0-9_-]{1,128}\z/', $idempotencyKey) !== 1) {
+                throw new Exception(
+                    'Idempotency key must be 1-128 letters, digits, "-" or "_"',
+                    Exception::INVALID_PARAM
+                );
+            }
+            $headers[] = 'Idempotency-Key: ' . $idempotencyKey;
+        }
+
+        return $this->request('POST', '/create-withdrawal', $params, true, $headers);
     }
     
     /**
@@ -177,16 +195,17 @@ class Client
      * @param string $path     API endpoint path
      * @param array  $params   Request parameters
      * @param bool   $withAuth Whether to send the x-api-key/x-api-secret headers
+     * @param array  $extraHeaders Additional "Name: value" request headers
      * @return array Response data
      * @throws Exception If the request fails
      */
-    private function request(string $method, string $path, array $params = [], bool $withAuth = true): array
+    private function request(string $method, string $path, array $params = [], bool $withAuth = true, array $extraHeaders = []): array
     {
         $url = $this->baseUrl . $path;
-        $headers = [
+        $headers = array_merge([
             'Content-Type: application/json',
             'Accept: application/json'
-        ];
+        ], $extraHeaders);
 
         if ($withAuth) {
             $headers[] = 'x-api-key: ' . $this->apiKey;
@@ -206,15 +225,20 @@ class Client
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 30);
         curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
+        // The API never redirects. Following one would resend the x-api-key
+        // and x-api-secret headers to the new location.
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlError = curl_error($ch);
 
-        curl_close($ch);
-
         if ($response === false) {
             throw new Exception('cURL error: ' . $curlError, Exception::NETWORK_ERROR);
+        }
+
+        if ($httpCode >= 300 && $httpCode < 400) {
+            throw new Exception('Unexpected redirect from the API', Exception::API_ERROR, $httpCode);
         }
 
         // Store raw response for debugging purposes

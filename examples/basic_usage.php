@@ -39,7 +39,7 @@ try {
         'amount' => '10.5',
         'ipnUrl' => 'https://yourwebsite.com/webhook.php',
         'udf' => 'withdrawal-456' // Optional reference
-    ]);
+    ], 'payout-456'); // Idempotency key: a retry cannot send the money twice
     
     echo "✓ Withdrawal created:\n";
     echo "  ID: {$withdrawal['id']}\n";

@@ -34,5 +34,8 @@
             "SagaPay\\SDK\\": "src/"
         }
     },
+    "scripts": {
+        "test": "php tests/run.php"
+    },
     "minimum-stability": "stable"
 }

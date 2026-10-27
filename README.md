@@ -75,8 +75,12 @@ $withdrawal = $client->createWithdrawal([
     'amount' => '10.5',                // Required: Withdrawal amount
     'ipnUrl' => 'https://example.com/webhook.php',  // Required: URL for notifications
     'udf' => 'withdrawal-456'          // Optional: User-defined field
-]);
+], 'payout-456');                      // Optional, recommended: idempotency key
 ```
+
+Withdrawals need an API key created with **Withdrawals** turned on, which requires two-factor authentication on your account.
+
+The second argument (1-128 letters, digits, `-` or `_`) is sent as an `Idempotency-Key` header, so that a retry after a timeout or network error cannot send the money twice. For 24 hours, a repeat with the same key returns the first withdrawal instead of creating another; while the first request is still running, a repeat fails with HTTP 409. Use one key per payout, such as your own payout id.
 
 ### Check Transaction Status
 
@@ -100,7 +104,13 @@ $balance = $client->fetchWalletBalance(
 
 ## Handling Webhooks (IPN)
 
-SagaPay sends webhook notifications (IPNs) to your specified `ipnUrl` when a transaction completes. Use the WebhookHandler to process these notifications:
+SagaPay sends webhook notifications (IPNs) to your specified `ipnUrl` when a transaction completes. Each one carries a signature over the exact raw request body:
+
+```
+X-Sagapay-Merchant-Signature: sha256=<hex HMAC-SHA256 of the raw body>
+```
+
+It is keyed with your **signing secret**. Copy it from the dashboard: **Webhooks → Signing secret**. It is not your API secret, and nobody else's secret can produce a valid signature for your notifications. `WebhookHandler` checks the signature on every notification, and a handler without a secret rejects them all.
 
 ```php
 <?php
@@ -108,55 +118,57 @@ SagaPay sends webhook notifications (IPNs) to your specified `ipnUrl` when a tra
 require_once 'vendor/autoload.php';
 
 use SagaPay\SDK\Client;
+use SagaPay\SDK\Exception;
 use SagaPay\SDK\WebhookHandler;
 
 $client = new Client('your-api-key', 'your-api-secret');
 
-// Optional platform-issued IPN secret (NOT your API secret). When null,
-// signature verification is skipped and verifyWithServer() below is the
-// primary check.
-$ipnSecret = null; // e.g. 'your-platform-ipn-secret'
-
-$webhookHandler = new WebhookHandler($client, $ipnSecret);
+$webhookHandler = new WebhookHandler(
+    $client,
+    getenv('SAGAPAY_SIGNING_SECRET') ?: null,     // Webhooks → Signing secret
+    WebhookHandler::DEFAULT_MAX_AGE_SECONDS       // Optional: refuse notifications older than a day
+);
 
 try {
-    // Process and validate the webhook
+    // Verifies X-Sagapay-Merchant-Signature over the exact raw body, then parses it.
     $webhookData = $webhookHandler->processWebhook(getallheaders(), file_get_contents('php://input'));
-
-    // Confirm the notification against the SagaPay API (recommended)
-    if (!$webhookHandler->verifyWithServer($webhookData)) {
-        throw new \SagaPay\SDK\Exception('IPN could not be verified with the server');
-    }
-
-    // Handle the validated webhook data
-    $transactionId = $webhookData['id'];
-    $type = $webhookData['type']; // 'DEPOSIT' or 'WITHDRAWAL'
-    $status = $webhookData['status']; // 'COMPLETED' (the only status sent today)
-    $address = $webhookData['address'];
-    $amount = $webhookData['amount'];
-    $udf = $webhookData['udf'] ?? null; // Your custom reference field
-
-    // IPNs are delivered at least once — the same notification may arrive
-    // more than once, so make your processing idempotent (e.g. skip
-    // transaction IDs you have already handled).
-    if ($status === 'COMPLETED' && $type === 'DEPOSIT') {
-        // Process successful payment
-        // e.g., updateOrderStatus($udf, 'paid');
-    }
-
-    // Send success response
-    $webhookHandler->sendSuccessResponse();
-
-} catch (\SagaPay\SDK\Exception $e) {
-    // Log the error and send error response
-    error_log("Webhook error: " . $e->getMessage());
-    $webhookHandler->sendErrorResponse($e->getMessage(), $e->getCode());
+} catch (Exception $e) {
+    error_log('Rejected webhook: ' . $e->getMessage());
+    http_response_code(401);
+    exit;
 }
+
+// Process each id once. Delivery is at-least-once, and a replayed request
+// carries a valid signature too.
+if (!markProcessed($webhookData['id'])) { // e.g. INSERT ... ON CONFLICT DO NOTHING
+    $webhookHandler->sendSuccessResponse();
+}
+
+if ($webhookData['type'] === 'DEPOSIT') {
+    // Check what arrived before you credit it.
+    creditOrder($webhookData['udf'], $webhookData['asset'], $webhookData['contractAddress'], $webhookData['amount']);
+} else {
+    markPayoutSent($webhookData['udf'], $webhookData['txHash']);
+}
+
+// Answer 2xx within 20 seconds. If your own processing fails, answer 5xx
+// instead so SagaPay retries.
+$webhookHandler->sendSuccessResponse();
 ```
+
+The old `X-Sagapay-Signature` header was keyed with a secret shared by every merchant. It is retired: SagaPay no longer sends it, and this SDK no longer reads it.
+
+### Replay protection
+
+A captured webhook still has a valid signature, so the signature alone does not stop someone resending it. Protect against that:
+
+- **Process each `id` once.** Record the ids you have handled (a unique column works) and answer duplicates with a 200 without acting on them again. This is the main defence and also covers normal retries.
+- **Optionally check the age** with the third `WebhookHandler` argument, or `Util::isIpnFresh($webhookData, $maxAgeSeconds)`. Keep the limit above the retry schedule (about 7.5 hours): retries reuse the original `timestamp`. A notification you resend from the dashboard also keeps it, so a resend older than your limit will be refused.
+- **Check what you are crediting.** Match `asset`, `contractAddress`, `amount` and `address` against the order before you fulfil it.
 
 ## Webhook Payload Format
 
-SagaPay currently sends an IPN when a transaction completes, so `status` is always `COMPLETED`. Note that `type` uses UPPERCASE values on the wire:
+When SagaPay sends a webhook to your endpoint, it will include the following payload:
 
 ```json
 {
@@ -165,6 +177,8 @@ SagaPay currently sends an IPN when a transaction completes, so `status` is alwa
   "status": "COMPLETED",
   "address": "0x123abc...",
   "networkType": "ERC20|BEP20|TRC20|POLYGON|SOLANA",
+  "asset": "USDT",
+  "contractAddress": "0x55d398326f99059fF775485246999027B3197955",
   "amount": "10.5",
   "udf": "your-optional-user-defined-field",
   "txHash": "0xabc123...",
@@ -172,21 +186,14 @@ SagaPay currently sends an IPN when a transaction completes, so `status` is alwa
 }
 ```
 
-`udf` and `txHash` may be `null`. Delivery is at least once: the same notification can arrive more than once, so make your webhook processing idempotent.
+- `asset` and `contractAddress` say what was received; `contractAddress` is `null` for the chain's native coin. `networkType` alone does not tell 100 TRX from 100 USDT.
+- `udf` and `txHash` may be `null`.
+- `timestamp` is set when the transaction completes and does not change on retries.
+- SagaPay makes up to 6 delivery attempts, retrying after 1 min, 5 min, 15 min, 1 h and 6 h.
 
-### Webhook Signature
+### Confirming with the API
 
-Each IPN request carries an `X-Sagapay-Signature` header in the form `sha256=<hex>`, where `<hex>` is the HMAC-SHA256 of the exact raw request body keyed with a platform-issued IPN secret. This secret is NOT your API secret. If you have one, pass it as the second constructor argument of `WebhookHandler` to enable signature verification:
-
-```php
-$webhookHandler = new WebhookHandler($client, 'your-platform-ipn-secret');
-```
-
-When you don't have an IPN secret, leave the argument out (or pass `null`) — the signature check is skipped and server-side verification below is the primary check.
-
-### Verifying an IPN with the Server
-
-The primary way to confirm an IPN is to ask the SagaPay API directly via `Client::verifyIpn()` (or the `WebhookHandler::verifyWithServer()` convenience wrapper shown above). This endpoint authenticates with your API key/secret in the request body, so it needs no extra configuration:
+`Client::verifyIpn()` (or the `WebhookHandler::verifyWithServer()` wrapper) asks the SagaPay API to confirm a notification's transaction. It authenticates with your API key/secret in the request body. Check the signature first; this network call is an extra check on top of it:
 
 ```php
 $verified = $client->verifyIpn(
@@ -195,10 +202,12 @@ $verified = $client->verifyIpn(
     $webhookData['amount'],       // Amount from the IPN
     $webhookData['address']       // Address from the IPN
 );
+```
 
-if (!$verified) {
-    // Reject the notification
-}
+## Testing
+
+```bash
+php tests/run.php
 ```
 
 ## Error Handling
